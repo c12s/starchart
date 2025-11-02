@@ -8,15 +8,16 @@ import Event from "./shapes/Event";
 import EventTrigger from "./shapes/EventTrigger";
 import { DataSourceModal } from "./modals/DataSourceModal";
 import { UniKernelModal } from "./modals/UniKernelModal";
-import type { IShape, ILine, Node } from "./shapes/types";
+import type { IShape, ILine, Node, ISettings } from "./shapes/types";
 import { EShapeType } from "./shapes/types";
 import { startCase } from "lodash";
 import { SemanticAnalysisModal } from "./modals/SemanticAnalysisModal";
-import { checkSemanticAnalysisSuccess, performGraphSerialization } from "./semantics/Serialization";
+import { checkSemanticAnalysisSuccess, downloadYaml, performGraphSerialization } from "./semantics/Serialization";
 import { performGraphSemanticAnalysis } from "./semantics/Serialization";
 import { getGraphEdges, performGraphDeserialization } from "./semantics/Deserialization";
 import { MessageModal } from "./modals/MessageModal";
 import type { Diagnostic } from "./semantics/DiagnosticReporter";
+import { SettingsModal } from "./modals/SettingsModal";
 
 const SHAPE_WIDTH = 120;
 const SHAPE_HEIGHT = 60;
@@ -39,10 +40,21 @@ function App() {
   const [semanticAnalysisReport, setSemanticAnalysisReport] = useState<Map<Node, Diagnostic[]>>(new Map());
   const [deserializationError, setDeserializationError] = useState<string>("");
 
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [settings, setSettings] = useState<ISettings>({
+    apiVersion: "v1",
+    schemaVersion: "v1",
+    kind: "StarChart",
+    engine: "unikraft",
+    visibility: "public",
+    name: "Untitled Chart",
+    maintainer: "Anonymous",
+    description: "",
+    labels: []
+  });
+
   // Used for YAML file upload.
   const fileInputRef = useRef<HTMLInputElement>(null);
-
-  console.log("shapes", shapes);
 
   const addShape = (type: EShapeType) => {
     const newShape: IShape = {
@@ -264,7 +276,7 @@ function App() {
     reader.onload = (e) => {
       const content = e.target?.result;
       if (typeof content === 'string') {
-        const graph = performGraphDeserialization(content);
+        const [graph, schemaData] = performGraphDeserialization(content);
 
         // If an error occurred during reconstruction.
         if (graph.length == 0) {
@@ -278,6 +290,7 @@ function App() {
         const semanticCheck = checkSemanticAnalysisSuccess(semanticAnalysisResults);
         if (semanticCheck) {
           const edges = getGraphEdges(graph);
+          setSettings(schemaData);
           setShapes(graph);
           setLines(edges.lines);
           setSoftLines(edges.softLines);
@@ -347,9 +360,14 @@ function App() {
           }}>Load from file
         </button>
         <button className="button-main" onClick={() => {
-              setSemanticAnalysisReport(performGraphSemanticAnalysis(shapes));
-              const success = performGraphSerialization(shapes);
-              if (!success) setShowAnalysisModal(true);
+              const semanticAnalysisResults = performGraphSemanticAnalysis(shapes);
+              setSemanticAnalysisReport(semanticAnalysisResults);
+              if (semanticAnalysisResults.size == 0) {
+                setShowSettingsModal(true);
+              }
+              else {
+                setShowAnalysisModal(true);
+              }
             }}>Save
         </button>
       </div>
@@ -401,6 +419,20 @@ function App() {
           open={showMessageModal}
           onClose={() => setShowMessageModal(false)}
           initial={deserializationError}
+        />
+      <SettingsModal
+          open={showSettingsModal}
+          onClose={() => {
+            setShowSettingsModal(false);
+          }}
+          onSubmit={(data) => {
+            const chartSettings = data;
+            setSettings(chartSettings); 
+
+            const yaml = performGraphSerialization(shapes, chartSettings);
+            downloadYaml(yaml, `${chartSettings.name}.yaml`);
+          }}
+          initial={settings}
         />
       <input type="file" accept=".yaml,.yml" style={{ display: 'none' }} ref={fileInputRef} onChange={handleFileUpload} />
     </div>
